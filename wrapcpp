@@ -1,0 +1,38 @@
+#!/bin/sh
+
+if [ "$#" -ne 1 ]; then
+	echo "A C preprocessor wrapper, behaves like an ancient MPW one" >&2
+	echo "Usage: $0 [NanoKernel.c|Emulate68020.c|HardwareInit.c] >Assembly.cpp" >&2
+	exit 1
+fi
+
+set -e
+set -o pipefail
+
+TMP=$(mktemp -d)
+trap "rm -rf $TMP" EXIT
+
+leafless="$(echo "$1" | sed 's_[^/]*$__')" # cut off terminal non-slash chars
+
+cp "$leafless"*.s "$leafless"*.c "$TMP/"
+
+# Change MacOS line endings to LF
+# Strip asm-style comments from the RHS of preprocessor directives
+# Prevent #-nonalpha from being misinterpreted as a preprocessor directive
+# Change "if not defined" to "if ! defined"
+# Remove the space separating the left paren from a function-like macro (maybe a Clang bug?)
+for x in "$TMP"/*; do
+	LC_CTYPE=C tr '\r' '\n' <"$x" | LC_CTYPE=C sed -E \
+		-e 's/#if not defined/#if ! defined/' \
+		-e 's_(^#[^#]*);#.*_\1_' \
+		-e 's_(^#[^#]*).*_\1_' \
+		-e 's_(^[[:space:]]*#[^A-Za-z])_//-//\1_' \
+		-e 's_([A-Za-z_0-9])[[:space:]]+\(_\1(_g' \
+		> "$x.new"
+	mv "$x.new" "$x"
+done
+
+cpp -w "$TMP/$(basename "$1")" | sed -E \
+	-e 's_//-//__' \
+	-e 's/##//g' \
+	-e 's/([A-Za-z_0-9])(\()/\1 \2/g'

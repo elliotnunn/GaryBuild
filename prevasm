@@ -1,0 +1,52 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+TMP=$(mktemp)
+trap "rm -f $TMP" EXIT
+
+cat <<HERE
+# The following code should be assembled by vasmppc_std
+
+.macro _calc_4arg
+	.set bitnum, 0
+	.set maskstart, 0
+	.set maskend, 31
+
+	.rept 32
+		.if fullmask & 0xc0000000 = 0x40000000
+			.set maskstart, (bitnum + 1) % 32
+		.endif
+
+		.if fullmask & 0xc0000000 = 0x80000000
+			.set maskend, bitnum
+		.endif
+
+		.set fullmask, ((fullmask << 1) & 0xfffffffe) | ((fullmask >> 31) & 1) # rotate left one bit
+		.set bitnum, bitnum + 1
+	.endr
+.endm
+HERE
+
+sed -E -e 's/;#.*//g' -e 's/#.*//g' \
+	| tr ';' '\n' \
+	| awk '/.csect/ {np=0} /\.toc/ {np=1} /\.csect.*\{/ {np=1} {if (!np) {print}}' \
+	| sed -E \
+		-e 's/\.align([[:space:]]+[^,;#]+)/.p2alignl\1, 0x48000004/' \
+		-e '/\.globl.*\{/d' \
+		-e 's/^([[:space:]]*)mtfs([[:space:]]+)/\1mtfsf\2255,/' \
+		-e 's/\(([A-Za-z0-9_]+)<16\)>16/(\1<48)>48/g' \
+		-e 's/</<</g' \
+		-e 's/>/>>/g' \
+		-e 's/(rlw[a-z]+\.?[[:space:]]+[^,#]+,[^,#]+,[^,#]+,)([^,#]+)(;|#|$)/.sxx fullmask, \2; _calc_4arg;\1 maskstart, maskend\3/' \
+		-e 's/\.csect/.section MainCodeSection, "c"/' \
+		-e 's/\.dsect[[:space:]]+([^[:space:]]+)/.section \1, "n"/' \
+		-e 's/\.org[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\+/.org /' \
+		-e 's/:[[:space:]]*([A-Za-z0-9_])/:;\1/g' \
+	| tr ';' '\n' \
+	>$TMP
+
+# Float all simple constant .set directives to the top
+(egrep '^\s+\.set\s+\w+,\s*\d\w*\s*$' $TMP
+egrep -v '^\s+\.set\s+\w+,\s*\d\w*\s*$' $TMP) | sed 's/\.sxx/.set/'

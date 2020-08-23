@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+if [ "$#" -ne 2 ]; then
+	echo "Simple 32-bit big-endian ELF code section blatter" >&2
+	echo "Usage: $0 ELF CODESECT" >&2
+	exit 1
+fi
+
+getval() { # file offset width
+	echo $((0x$(od -An -t x1 -j$2 -N$3 "$1" | tr -d ' \t\n\r')))
+}
+
+getstr() { # file offset
+	dd if="$1" bs=1 skip=$2 count=256 2>/dev/null | LC_CTYPE=C tr '\000' '\n' | head -n1
+}
+
+e_shoff=$(getval "$1" $((0x20)) 4)
+e_shentsize=$(getval "$1" $((0x2e)) 2)
+e_shnum=$(getval "$1" $((0x30)) 2)
+
+secs="$(seq $e_shoff $e_shentsize $((e_shoff + e_shentsize * (e_shnum - 1) )) )"
+
+for strsec in $secs; do
+	[ $(getval "$1" $(($strsec + 4)) 4) -eq 3 ] && break
+done
+
+strsec=$(getval "$1" $(($strsec + 0x10)) 4)
+
+for codesec in $secs; do
+	sh_name=$(getval "$1" $codesec 4)
+	sh_name="$(getstr "$1" $(($strsec + $sh_name)) )"
+	[ MainCodeSection = "$sh_name" ] && break
+done
+
+sh_offset=$(getval "$1" $(($codesec + 0x10)) 4)
+sh_size=$(getval "$1" $(($codesec + 0x14)) 4)
+
+dd if="$1" of="$2" bs=1 skip=$sh_offset count=$sh_size
