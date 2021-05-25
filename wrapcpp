@@ -12,6 +12,8 @@ set -o pipefail
 TMP=$(mktemp -d)
 trap "rm -rf $TMP" EXIT
 
+export LC_ALL=C
+
 leafless="$(echo "$1" | sed 's_[^/]*$__')" # cut off terminal non-slash chars
 
 cp "$leafless"*.s "$leafless"*.c "$TMP/"

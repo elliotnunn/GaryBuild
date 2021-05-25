@@ -6,6 +6,8 @@ set -o pipefail
 TMP=$(mktemp)
 trap "rm -f $TMP" EXIT
 
+export LC_ALL=C
+
 cat <<HERE
 # The following code should be assembled by vasmppc_std
 
